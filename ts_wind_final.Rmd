@@ -1,0 +1,542 @@
+---
+title: "Desafio de Séries Temporais II"
+author: "Arthur Hintz, Beatriz Buffon, Jonatan Araujo , Yasmin Pires"
+date: "`r format(Sys.time(), '%d %b %Y')`"
+output:
+  html_document:
+    theme: journal
+    toc: true
+    toc_float:
+      collapsed: true
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(dpi = 300)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(fig.width=6, fig.height=4)
+```
+
+```{css, echo = FALSE}
+body {
+  text-align: justify;
+}
+```
+
+```{r, include=FALSE}
+# Pacotes
+library(kableExtra)
+library(tidyverse)
+library(forecast)
+library(plotly)
+library(ggpubr)
+library(fpp)
+```
+
+
+```{r}
+tema_personalizado <- theme_minimal() +
+  theme(
+    text = element_text(family = "sans", color = "#317eac"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 10),
+    panel.grid.major = element_line(color = "#ced4da"),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "#ced4da"),
+    panel.background = element_rect(fill = "white")
+  )
+```
+
+# Introdução
+
+O presente relatório tem como objetivo analisar a série temporal referente à **velocidade média do vento** registrada em Brasília, com dados obtidos da estação meteorológica **83377**. A série temporal compreende medições mensais de velocidade média do vento (em metros por segundo) e velocidade máxima média, coletadas no intervalo entre **janeiro de 2001** e **dezembro de 2018**.
+
+Brasília, localizada no Planalto Central, apresenta características climáticas peculiares, influenciadas por sua altitude elevada e pela presença de estações bem definidas, como a estação chuvosa e a seca. A velocidade do vento desempenha um papel importante no clima local, influenciando não apenas a temperatura percebida, mas também a dispersão de poluentes e outros processos atmosféricos relevantes.
+
+A análise da série temporal permitirá identificar padrões sazonais, tendências e possíveis mudanças ao longo do tempo nos dados coletados. Serão aplicadas técnicas estatísticas e gráficas, como decomposição da série, testes de estacionariedade e modelagens adequadas, com o intuito de explorar e modelar os comportamentos observados.
+
+
+# Bancos de Dados
+Nesta seção, apresentamos as **três primeiras** e **três últimas observações** da série temporal de velocidade média do vento e velocidade máxima média, a fim de ilustrar o início e o final do período analisado.
+
+A tabela mostra que a base de dados se estende de **janeiro de 2001** até **dezembro de 2018**, com medições mensais consistentes ao longo de **216 observações**. As variáveis principais são:
+
+1. **VelocidadeVentoMedia**: Velocidade média do vento no mês, em metros por segundo.
+2. **VelocidadeVentoMaximaMedia**: Velocidade máxima média do vento no mês, em metros por segundo.
+
+```{r}
+# Arthur directory
+data_brasilia<-read.table("wind-brasilia.txt",header = T, sep = ";")[,2:5] # ler os dados
+
+data_brasilia$Data <- as.Date(data_brasilia$Data, "%d/%m/%Y")
+
+dados <- data_brasilia |> 
+  select(1, 3) |> 
+  mutate(
+    Year = year(Data),      
+    Month = month(Data)      
+  )
+
+serie_temporal <- ts(dados$VelocidadeVentoMedia,start=c(2001,01),frequency=12)
+
+```
+
+
+```{r}
+dados_selecionados <- rbind(head(data_brasilia, 3), tail(data_brasilia, 3))
+
+dados_selecionados |> 
+  kable(caption = "Três primeiros e três últimas observações da série temporal")
+
+```
+
+# Análise Exploratória
+
+### Série Observada
+
+Nesta seção, analisamos o **comportamento da série temporal** de velocidade média do vento em Brasília ao longo do tempo.
+A tabela a seguir apresenta as **estatísticas descritivas** da variável **VelocidadeVentoMedia**:
+
+```{r}
+summary(serie_temporal)
+
+```
+
+Abaixo, apresentamos o **gráfico da série temporal** da velocidade média do vento:
+
+```{r}
+# Gráfico da Série Temporal
+autoplot(serie_temporal) + 
+  labs(
+    title = "Série Temporal da Velocidade do Vento",
+    x = "Tempo (meses)",
+    y = "Velocidade do Vento"
+  ) +
+  tema_personalizado +
+  scale_color_manual(values = c("#FF6347"))
+```
+
+O gráfico abaixo apresenta a **sobreposição da velocidade média do vento** em Brasília para os anos de **2001, 2004, 2007, 2010, 2013 e 2016**.
+
+```{r}
+
+dados_filtrados <- dados %>% 
+  filter(Year %% 3 == 0)  
+
+dados_filtrados$Mes <- format(dados_filtrados$Data, "%m") 
+# Gráfico sobreposto com filtro de 3 anos
+ggplot(dados_filtrados, aes(x = as.numeric(Mes), y = VelocidadeVentoMedia, color = as.factor(Year), group = Year)) +
+  geom_line(size = 1) +
+  scale_x_continuous(
+    breaks = 1:12,  # Rótulos de 1 a 12 para os meses
+    labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+               "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+  ) +
+  labs(
+    title = "Sobreposição da Velocidade do Vento a cada 3 anos",
+    x = "Mês",
+    y = "Velocidade do Vento Média",
+    color = "Ano"
+  ) +
+  tema_personalizado +
+  theme(
+    legend.position = "right",
+    legend.background = element_rect(fill = "white", color = NA)
+  )
+
+```
+
+O gráfico abaixo apresenta as **médias** por mês, acompanhadas de **barras de erro**, que representam o desvio padrão dos valores.
+
+```{r}
+
+dados_mensais <- data.frame(
+  Mes = cycle(serie_temporal),                
+  Ano = floor(time(serie_temporal)),
+  Valor = as.numeric(serie_temporal)        
+) %>%
+  group_by(Mes) %>%
+  summarise(
+    Media = mean(Valor, na.rm = TRUE),          
+    Desvio = sd(Valor, na.rm = TRUE)            
+  )
+
+dados_mensais$Mes_Label <- factor(
+  dados_mensais$Mes, 
+  levels = 1:12, 
+  labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun", 
+             "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+)
+
+# Criar o gráfico
+ggplot(dados_mensais, aes(x = Mes_Label, y = Media)) +
+  geom_bar(stat = "identity", fill = "#317eac", alpha = 0.7) +  # Barras para a média
+  geom_errorbar(aes(ymin = Media - Desvio, ymax = Media + Desvio), 
+                width = 0.3, color = "black") +                 # Barras de erro
+  labs(
+    title = "Médias Mensais",
+    x = "Mes",
+    y = "Velocidade Média"
+  ) +
+  tema_personalizado +
+  theme(
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+```
+
+
+- A velocidade média do vento apresenta um pico nos meses de agosto e setembro, com valores superiores a 2.8 m/s. Este período coincide com o auge da estação seca em Brasília, caracterizado por ventos mais intensos.
+
+- Nos meses de março, abril e dezembro, observa-se uma redução significativa na velocidade média do vento, com valores próximos a 1.8 m/s.
+
+- As barras de erro indicam a variabilidade da série ao longo de cada mês. Nota-se uma dispersão maior nos meses de julho a setembro, refletindo a ocorrência de ventos mais intensos e irregulares.
+
+### Gráfico da Função de Autocorrelação (FAC)
+
+Para identificar dependências temporais na série de **velocidade média do vento**, foi calculada a **Função de Autocorrelação (ACF)**, apresentada no gráfico abaixo.
+
+```{r}
+ggAcf(serie_temporal, lag.max = 36) + 
+  labs(
+    title = "Função de Autocorrelação (ACF)",
+    y = "Autocorrelação"
+  ) +
+  tema_personalizado +
+  scale_color_manual(values = c("#FF8C00"))
+
+```
+
+- As barras que ultrapassam as linhas azuis representam autocorrelações estatisticamente significativas. Observa-se que há picos significativos nos primeiros lags, especialmente nos lags 2, 12 e 24, sugerindo dependência temporal na série.
+
+- O comportamento cíclico dos picos de autocorrelação ao redor dos lags 12 e 24 indica a possível presença de sazonalidade anual na série temporal.
+
+- As autocorrelações diminuem lentamente, indicando que a série pode ser não estacionária, ou seja, a média e a variância podem variar ao longo do tempo.
+
+### Gráfico da Função de Autocorrelação Parcial 
+
+Para complementar a análise da autocorrelação e identificar possíveis ordens de processos autorregressivos (AR) na série temporal de **velocidade média do vento**, foi calculada a **Função de Autocorrelação Parcial (PACF)**.
+
+```{r}
+ggPacf(serie_temporal, lag.max = 36) + 
+  labs(
+    title = "Função de Autocorrelação Parcial (PACF)",
+    y = "Autocorrelação Parcial"
+  ) +
+  tema_personalizado +
+  scale_color_manual(values = c("#32CD32"))
+```
+
+Os lags significativos aparecem principalmente em 12 e 24, sugerindo a presença de um componente autorregressivo de ordem 1 (AR(1)) e um possível componente sazonal com periodicidade anual.
+
+
+### Decomposição aditiva
+
+A decomposição da série temporal foi realizada para separar os componentes principais: **tendência**, **sazonalidade** e **resíduos (ruídos)**.
+
+```{r}
+decomposicao_aditiva <- decompose(serie_temporal, type = "additive")
+autoplot(decomposicao_aditiva) + 
+  labs(title = "Decomposição Aditiva da Série Temporal") +
+  tema_personalizado +
+  scale_color_manual(values = c("#4682B4"))
+```
+
+- **Série Original (data)**: A primeira linha do gráfico representa os dados originais da série temporal. Observa-se uma flutuação significativa, com picos em determinados períodos, sugerindo variações sazonais e estruturais.
+
+- **Tendência (trend)**:A linha de tendência destaca variações de longo prazo na série. Nota-se um comportamento declinante entre 2005 e 2015, seguido de uma leve recuperação nos anos finais. Isso indica possíveis mudanças climáticas ou ambientais que influenciam a velocidade média do vento.
+
+- **Sazonalidade (seasonal)**: A terceira linha evidencia um padrão sazonal bem definido ao longo dos anos. As oscilações periódicas têm frequência anual, com picos recorrentes nos mesmos meses, especialmente em julho, agosto e setembro.
+
+- **Resíduos (remainder)**:A última linha representa os resíduos, ou seja, as flutuações não explicadas pelos componentes de tendência e sazonalidade. Os resíduos aparentam ser ruídos aleatórios, mas com alguns períodos de variações mais intensas.
+
+# Testes
+
+### Teste de Ljung-Box para Autocorrelação
+
+O **Teste de Ljung-Box** foi realizado para verificar a presença de autocorrelação significativa nos dados da série temporal. Este teste avalia a hipótese de que os dados são aleatórios ou, em contrapartida, possuem dependência temporal.
+Dado o p-valor extremamente baixo (5.329e-15), que é menor que o nível de significância usual de 0.05, rejeitamos a hipótese nula (H0). Isso indica que **há autocorrelação significativa na série temporal**.
+
+```{r}
+ljung_box_test <- Box.test(serie_temporal, type = "Ljung-Box")
+print(ljung_box_test)
+
+```
+
+### Teste de Heterocedasticidade de White
+
+O Teste de Heterocedasticidade de White foi aplicado para verificar a presença de heterocedasticidade na série temporal. Este teste avalia a hipótese nula de homocedasticidade, ou seja, de que a variância dos resíduos é constante ao longo do tempo. O teste apresentou um p-valor maior que o nível de significância usual (α=0.05), então **não rejeitamos a hipótese nula de homocedasticidade**.
+
+```{r}
+white_test <- lmtest::bptest(serie_temporal ~ stats::lag(serie_temporal, -1))
+print(white_test)
+```
+
+### Teste de Normalidade (Anderson-Darling)
+
+O Teste de Anderson-Darling foi aplicado para avaliar a hipótese de que a série temporal segue uma distribuição normal. Este teste verifica a hipótese nula de que os dados seguem uma distribuição normal. O teste revela um p-valor menor que o nível de significância usual (α=0.05), então **rejeitamos a hipótese nula de normalidade**.
+
+```{r}
+ad_test <- nortest::ad.test(serie_temporal)
+print(ad_test)
+```
+
+### Testes de Tendência Determinística
+
+Os testes de tendência determinística foram aplicados para avaliar se a série temporal apresenta uma tendência significativa. Cada teste verifica a hipótese nula de que a série não apresenta tendência contra a hipótese alternativa de que há uma tendência presente.
+Para os testes de Cox-Stuart e Mann-Kendall, os **p-valores** são **0.0**, levando à **rejeição da hipótese nula (H0)** de que a série não possui tendência. Assim, estes testes confirmam a presença de **tendência determinística** significativa na série temporal.
+
+No teste KPSS, o **p-valor** foi **0.1**, indicando que não há evidências suficientes para rejeitar a hipótese nula (**H0**), que assume ausência de tendência. Neste caso, o teste KPSS conclui que **não há tendência determinística significativa**.
+
+A maioria dos testes (Cox-Stuart e Mann-Kendall) aponta a presença de **tendência determinística** na série temporal, enquanto o teste KPSS sugere o contrário. Dado que múltiplos testes indicam **tendência**, podemos concluir que a série apresenta uma **componente de tendência significativa**.
+
+```{r}
+tend_determ <- function(ts) {
+  # Aplicação dos testes de tendência
+  CS <- suppressWarnings(randtests::cox.stuart.test(ts, c("two.sided")))  # H0: NAO existe tendência
+  CeST <- suppressWarnings(trend::cs.test(ts))                            # H0: NAO existe tendência
+  MannKT <- suppressWarnings(trend::mk.test(ts, continuity = TRUE))       # H0: a série é i.i.d. / NAO existe tendência
+  MannK <- suppressWarnings(Kendall::MannKendall(ts))                     # H0: NAO existe tendência
+  KPSST <- suppressWarnings(tseries::kpss.test(ts, null = c("Trend")))    # H0: NAO existe tendência
+  
+  # Extração dos valores-p e conclusões
+  p_value <- c(CS$p.value, CeST$p.value, MannKT$p.value, MannK$sl, KPSST$p.value)
+  p_value1 <- ifelse(p_value >= 0.05, "Não Tendência", "Tendência")
+  
+  # Tabela com os resultados dos testes
+  tabela <- data.frame(
+    Testes = c("Cox Stuart", "Cox and Stuart Trend", "Mann-Kendall Trend", "Mann-Kendall", "KPSS Test for Trend"),
+    H0 = rep("Não tendência", 5),
+    p_valor = round(p_value, 4),
+    Conclusao = p_value1
+  )
+  
+  # Retornar os resultados em lista
+  list(CS = CS, CeST = CeST, MannKT = MannKT, MannK = MannK, KPSST = KPSST, Tabela = tabela)
+}
+
+resultado_tendencia <- tend_determ(serie_temporal)
+print(resultado_tendencia$Tabela)
+```
+
+### Teste de Raiz Unitária
+
+Os testes de raiz unitária foram realizados para verificar a estacionaridade da série temporal. Esses testes avaliam a hipótese nula de que a série apresenta uma raiz unitária (não estacionaridade), contra a hipótese alternativa de que a série é estacionária.
+
+- Ambos os testes **Augmented Dickey-Fuller (ADF)** e **Phillips-Perron (PP)** têm como hipótese nula (**H0**) a presença de raiz unitária (série com tendência estocástica). Como os **p-valores** são **0.01** (menores que 0.05), rejeitamos a hipótese nula, concluindo que **não há tendência estocástica** e a série pode ser considerada **estacionária**.
+
+- O teste **KPSS** possui como hipótese nula (**H0**) a **ausência de tendência** (série estacionária). Como o **p-valor** é **0.01** (menor que 0.05), rejeitamos a hipótese nula e concluímos que a série apresenta **tendência determinística**.
+
+Os resultados indicam que a série temporal **não possui raiz unitária** (não estacionária estocástica) segundo os testes **ADF** e **PP**. No entanto, o teste **KPSS** identifica a presença de uma **tendência determinística**.
+
+```{r}
+raiz_unit <- function(ts) {
+  # Aplicação dos testes de raiz unitária
+  ADF <- suppressWarnings(tseries::adf.test(ts, alternative = "stationary"))  # H0: raiz unitária
+  PP <- suppressWarnings(tseries::pp.test(ts, alternative = "stationary"))    # H0: raiz unitária
+  KPSSL <- suppressWarnings(tseries::kpss.test(ts, null = "Level"))           # H0: NAO existe tendência
+  
+  # Extração dos valores-p e conclusões
+  p_value <- c(ADF$p.value, PP$p.value, KPSSL$p.value)
+  p_value1 <- ifelse(p_value[1:2] >= 0.05, "Tendência", "NAO tendência")
+  p_value2 <- ifelse(p_value[3] >= 0.05, "NAO tendência", "Tendência")
+  
+  # Tabela com os resultados dos testes
+  tabela <- data.frame(
+    Testes = c("Augmented Dickey-Fuller", "Phillips-Perron Unit Root", "KPSS Test for Level"),
+    H0 = c("Tendência", "Tendência", "NAO tendência"),
+    p_valor = round(p_value, 4),
+    Conclusao = c(p_value1, p_value2)
+  )
+  
+  # Retornar os resultados em lista
+  list(ADF = ADF, PP = PP, KPSSL = KPSSL, Tabela = tabela)
+}
+
+resultado_raiz_unitaria <- raiz_unit(serie_temporal)
+print(resultado_raiz_unitaria$Tabela)
+```
+
+
+### Sazonalidade
+
+Os testes de sazonalidade foram realizados para verificar se a série temporal apresenta variações sazonais significativas. Esses testes avaliam a hipótese nula de que a série não apresenta sazonalidade, contra a hipótese alternativa de que a série é sazonal. Os resultados dos testes indicam que tanto o Kruskal-Wallis quanto o Friedman rank apresentam p-valores extremamente baixos. Isso nos permite **rejeitar a hipótese nula de ausência de sazonalidade para ambos os testes**.
+
+```{r}
+sazonalidade <- function(ts, diff = 0, freq = 12) {
+  # Aplicação dos testes de sazonalidade
+  KrusW <- suppressWarnings(seastests::kw(ts, diff = diff, freq = freq))   # H0: NAO sazonal
+  Fried <- suppressWarnings(seastests::fried(ts, diff = diff, freq = freq)) # H0: NAO sazonal
+  
+  # Extração dos valores-p e conclusões
+  p_value <- c(KrusW$Pval, Fried$Pval)
+  p_value1 <- ifelse(p_value >= 0.05, "NAO sazonal", "Sazonal")
+  
+  # Tabela com os resultados dos testes
+  tabela <- data.frame(
+    Testes = c("Kruskal-Wallis", "Friedman rank"),
+    H0 = rep("NAO sazonal", 2),
+    p_valor = round(p_value, 4),
+    Conclusao = p_value1
+  )
+  
+  # Retornar os resultados em lista
+  list(KrusW = KrusW, Fried = Fried, Tabela = tabela)
+}
+
+resultado_sazonalidade <- sazonalidade(serie_temporal)
+print(resultado_sazonalidade$Tabela)
+```
+
+
+# Séria Temporal Ajustada
+
+Para modelar a série temporal da velocidade média do vento, foi utilizado o modelo **ETS (Erro, Tendência e Sazonalidade)**, especificamente o modelo **ETS(A,N,A)**, que considera:
+
+- **A**: Componente aditivo de erro.  
+- **N**: Sem componente de tendência.  
+- **A**: Componente aditivo de sazonalidade.
+
+```{r}
+n <- length(serie_temporal)
+
+y <- serie_temporal[1:(n-12)]
+y <- ts(y,start=c(2001,01),frequency=12)
+
+
+# Devido a Tendência e Sazonalidade, ajustar Modelo ETS
+
+#Modelo
+mod <- ets(y)
+summary(mod)
+
+# Erro Aditivo, Sem Tendencia, Sazonalidade Aditiva
+
+accuracy(mod)
+```
+
+- O modelo **ETS(A,N,A)** foi capaz de capturar as características da série, especialmente a **sazonalidade** aditiva, como indicado pela estrutura dos estados sazonais.
+
+- As métricas de erro, como **RMSE** e **MAPE**, indicam um ajuste razoável, com o **MAPE** em torno de **18%**, sugerindo uma precisão moderada do modelo.
+
+O modelo foi ajustado com sucesso à série temporal e apresentou métricas de erro aceitáveis. A presença de sazonalidade aditiva foi corretamente modelada, e os resíduos não indicam padrões significativos de autocorrelação.
+
+O gráfico abaixo apresenta a comparação entre os valores **observados** da série temporal (em preto) e os valores **ajustados** pelo modelo **ETS(A,N,A)** (em vermelho).
+
+```{r}
+data <- data.frame(
+  Tempo = as.Date(as.yearmon(time(y))),     
+  Observada = as.numeric(y),              
+  Ajustada = as.numeric(mod$fitted)          
+)
+
+# Criar o gráfico
+ggplot(data) +
+  geom_line(aes(x = Tempo, y = Observada, color = "Observada"), size = 1) +
+  geom_line(aes(x = Tempo, y = Ajustada, color = "Ajustada"), size = 1) +
+  labs(
+    x = "Tempo",
+    y = "Valores da Série",
+    color = "Legenda"
+  ) +
+  scale_color_manual(
+    values = c("Observada" = "black", "Ajustada" = "red")
+  ) +
+    scale_x_date(
+    date_breaks = "2 year",
+    date_labels = "%Y"           
+  ) +
+  tema_personalizado +
+  theme(
+    legend.position = "top",
+    legend.background = element_rect(fill = "white", color = NA),
+    legend.title = element_blank()
+  )
+```
+
+
+### Previsão
+
+A previsão foi realizada utilizando o modelo **ETS(A,N,A)**, que incorpora uma estrutura aditiva de erro e sazonalidade, sem tendência. O gráfico abaixo apresenta os valores observados e as previsões futuras, com os respectivos **intervalos de confiança** de 80% e 95%.
+
+```{r}
+#Grafico Previsão +IC
+
+mod %>% forecast(h=12) %>%
+  autoplot() +
+  ylab("Velocidade Media")+
+  tema_personalizado
+```
+
+
+### Análise dos Resíduos
+
+- Os resíduos oscilam em torno de zero e não apresentam padrões visíveis, sugerindo que o modelo ajustou bem a série temporal e não deixou estrutura não explicada.
+
+- O gráfico de ACF mostra que as autocorrelações estão dentro dos limites de confiança, indicando que os resíduos são próximos de ruído branco. Não há evidências de autocorrelação significativa.
+
+- O histograma revela que os resíduos estão aproximadamente distribuídos normalmente, com leve assimetria. A curva ajustada (em laranja) sugere um bom ajuste da distribuição.
+
+```{r}
+#Comparação Resíduos e erros de Previsão
+cbind('Residuals' = residuals(mod),
+      'Forecast errors' = residuals(mod,type='response')) %>%
+  autoplot(facet=TRUE) + xlab("Year") +
+  ylab("") + 
+  tema_personalizado
+```
+
+
+```{r}
+#Resíduos
+res_ets<-residuals(mod)
+
+ggtsdisplay(res_ets,plot.type="histogram", theme=theme_bw())
+```
+
+
+#### Teste de Normalidade
+
+No gráfico abaixo, os pontos representam os resíduos do modelo, enquanto a linha preta indica a distribuição normal teórica. Os resíduos próximos à linha sugerem que eles seguem aproximadamente uma distribuição normal.Os resíduos apresentam uma aproximação razoável à normalidade, com pequenos desvios nos extremos.
+
+```{r}
+#QQ Plot dos Res?duos
+ggqqplot(res_ets)+ggtitle("Resíduo do Modelo")
+
+
+#Teste de Normalidade dos Res?duos
+shapiro.test(res_ets)
+adf.test(res_ets)
+```
+
+- O teste de Shapiro-Wilk indica que os resíduos não são exatamente normais, possuindo pequenas assimetrias ou caudas mais pesadas. Apesar disso, o desvio é leve e pode não comprometer a adequação do modelo.
+
+- O teste ADF confirma que os resíduos são estacionários, uma condição necessária para um modelo bem ajustado.
+
+#### Teste de Correlação
+
+Os resultados do Teste de Box-Pierce confirmam que os resíduos do modelo ETS(A,N,A) não apresentam autocorrelação significativa. Esse diagnóstico reforça a adequação do modelo, uma vez que os resíduos independentes são uma condição importante para a validade das previsões.
+
+```{r}
+Box.test(res_ets, lag=10)
+```
+
+# Conclusão
+
+A análise da série temporal da **velocidade média do vento** em Brasília revelou padrões sazonais claros e uma tendência determinística, confirmados por testes estatísticos e análise gráfica. O modelo **ETS(A,N,A)**, ajustado aos dados, apresentou um desempenho satisfatório, capturando adequadamente a sazonalidade e a variabilidade da série. As métricas de erro, como **RMSE** (0.4509) e **MAPE** (18.09%), indicaram boa precisão, com pequenas discrepâncias nos picos.
+
+A análise dos resíduos confirmou a **adequação do modelo**, com resíduos **estacionários**, **independentes** e próximos de ruído branco, conforme demonstrado pelo **Teste de Augmented Dickey-Fuller** e **Box-Pierce**. Apesar de uma leve violação da normalidade observada no **Teste de Shapiro-Wilk**, a independência e estacionariedade dos resíduos garantem a confiabilidade das previsões.
+
+As previsões realizadas mantiveram a sazonalidade identificada, com intervalos de confiança consistentes. Assim, o modelo ETS(A,N,A) pode ser considerado apropriado para a série analisada, sendo útil para estimativas futuras da **velocidade média do vento**. 
+
+
+# Referências
+
+BISOGNIN, C. *Notas de Aula - STC1086: Séries Temporais I*. Universidade Federal de Santa Maria, Departamento de Estatística, Centro de Ciências Naturais e Exatas, 2023.

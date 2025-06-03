@@ -1,0 +1,21 @@
+---
+title: "Series Analisys"
+author: "Arthur"
+date: "2024-10-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Dados
+```{r}
+
+
+```
+
+
+# Análise de séries
+
+

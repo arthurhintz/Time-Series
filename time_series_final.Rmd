@@ -1,0 +1,385 @@
+---
+title: "Desafio de Séries Temporais I"
+author: "Arthur, Bia, Jou , Yas"
+date: "`r format(Sys.time(), '%d %b %Y')`"
+output: 
+  html_document:
+    theme: journal
+    toc: yes
+    toc_float:
+      collapsed: true
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(dpi = 300)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(fig.width=6, fig.height=4)
+```
+
+```{css, echo = FALSE}
+body {
+  text-align: justify;
+}
+```
+
+```{r, include=FALSE}
+# Pacotes
+library(kableExtra)
+library(tidyverse)
+library(forecast)
+library(plotly)
+library(ggpubr)
+library(zoo)
+```
+
+
+```{r}
+# Tema base para os gráficos
+tema_personalizado <- theme_minimal() +
+  theme(
+    text = element_text(family = "sans", color = "#317eac"),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5),
+    plot.subtitle = element_text(size = 12, hjust = 0.5),
+    axis.title = element_text(size = 12, face = "bold"),
+    axis.text = element_text(size = 10),
+    panel.grid.major = element_line(color = "#ced4da"),
+    panel.grid.minor = element_blank(),
+    plot.background = element_rect(fill = "#ced4da"),
+    panel.background = element_rect(fill = "white")
+  )
+```
+
+
+# Resumo
+
+# Introdução
+
+# Bancos de Dados
+
+```{r}
+# Arthur Directory
+dados <- read.csv("kalimati_tarkari_dataset.csv")
+
+dados$Date <- as.Date(dados$Date, format="%Y-%m-%d")
+
+```
+
+
+```{r}
+dados_selecionados <- rbind(head(dados, 3), tail(dados, 3))
+
+dados_selecionados |> 
+  kable(caption = "Três primeiros e três últimas observações da série temporal")
+
+```
+
+```{r}
+
+# Irei deixar em dois objeitos para fazer a análise dos missing days
+dados_commodity <- dados %>%
+  filter(Commodity == "Tomato Small(Local)") |> 
+  select(3,7) 
+
+
+dados_mensais <- dados_commodity %>%
+  mutate(Month = floor_date(Date, "month")) %>%
+  group_by(Month) %>%
+  summarize(AveragePrice = mean(Average, na.rm = TRUE))
+
+# Criar a série temporal
+serie_temporal <- ts(dados_mensais$AveragePrice, 
+                     start = c(year(min(
+                       dados_mensais$Month)),
+                       month(min(dados_mensais$Month))),
+                     frequency = 12)
+
+```
+
+
+
+# Análise Exploratória
+
+Comportamento da série temporal ao longo do tempo
+```{r}
+# Gráfico da Série Temporal
+autoplot(serie_temporal) + 
+  labs(
+    title = "Série Temporal de Preço Médio",
+    x = "Tempo (meses)",
+    y = "Preço Médio"
+  ) +
+  tema_personalizado +
+  scale_color_manual(values = c("#FF6347"))
+```
+
+Gráfico da Função de Autocorrelação (FAC)
+```{r}
+ggAcf(serie_temporal, lag.max = 36) + 
+  labs(
+    title = "Função de Autocorrelação (ACF)",
+    y = "Autocorrelação"
+  ) +
+  tema_personalizado +
+  scale_color_manual(values = c("#FF8C00"))
+
+```
+
+Gráfico da Função de Autocorrelação Parcial 
+```{r}
+ggPacf(serie_temporal, lag.max = 36) + 
+  labs(
+    title = "Função de Autocorrelação Parcial (PACF)",
+    y = "Autocorrelação Parcial"
+  ) +
+  tema_personalizado +
+  scale_color_manual(values = c("#32CD32"))
+```
+
+
+Decomposição multiplicativa
+```{r}
+decomposicao_multiplicativa <-decompose(serie_temporal, type = "multiplicative")
+autoplot(decomposicao_multiplicativa) + 
+  labs(title = "Decomposição Multiplicativa da Série Temporal") +
+  tema_personalizado +
+  scale_color_manual(values = c("#3CB371"))
+
+```
+
+# Testes
+
+## Teste de Ljung-Box para Autocorrelação
+```{r}
+ljung_box_test <- Box.test(serie_temporal, type = "Ljung-Box")
+print(ljung_box_test)
+
+```
+
+## Teste de Heterocedasticidade de White
+```{r}
+white_test <- lmtest::bptest(serie_temporal ~ stats::lag(serie_temporal, -1))
+print(white_test)
+```
+
+## Teste de Normalidade (Anderson-Darling)
+```{r}
+ad_test <- nortest::ad.test(serie_temporal)
+print(ad_test)
+```
+
+
+
+## Testes de Tendência Determinística
+
+```{r}
+tend_determ <- function(ts) {
+  # Aplicação dos testes de tendência
+  CS <- suppressWarnings(randtests::cox.stuart.test(ts, c("two.sided")))  # H0: NAO existe tendência
+  CeST <- suppressWarnings(trend::cs.test(ts))                            # H0: NAO existe tendência
+  MannKT <- suppressWarnings(trend::mk.test(ts, continuity = TRUE))       # H0: a série é i.i.d. / NAO existe tendência
+  MannK <- suppressWarnings(Kendall::MannKendall(ts))                     # H0: NAO existe tendência
+  KPSST <- suppressWarnings(tseries::kpss.test(ts, null = c("Trend")))    # H0: NAO existe tendência
+  
+  # Extração dos valores-p e conclusões
+  p_value <- c(CS$p.value, CeST$p.value, MannKT$p.value, MannK$sl, KPSST$p.value)
+  p_value1 <- ifelse(p_value >= 0.05, "Não Tendência", "Tendência")
+  
+  # Tabela com os resultados dos testes
+  tabela <- data.frame(
+    Testes = c("Cox Stuart", "Cox and Stuart Trend", "Mann-Kendall Trend", "Mann-Kendall", "KPSS Test for Trend"),
+    H0 = rep("Não tendência", 5),
+    p_valor = round(p_value, 4),
+    Conclusao = p_value1
+  )
+  
+  # Retornar os resultados em lista
+  list(CS = CS, CeST = CeST, MannKT = MannKT, MannK = MannK, KPSST = KPSST, Tabela = tabela)
+}
+
+resultado_tendencia <- tend_determ(serie_temporal)
+print(resultado_tendencia$Tabela)
+```
+
+## Teste de Raiz Unitária
+```{r}
+raiz_unit <- function(ts) {
+  # Aplicação dos testes de raiz unitária
+  ADF <- suppressWarnings(tseries::adf.test(ts, alternative = "stationary"))  # H0: raiz unitária
+  PP <- suppressWarnings(tseries::pp.test(ts, alternative = "stationary"))    # H0: raiz unitária
+  KPSSL <- suppressWarnings(tseries::kpss.test(ts, null = "Level"))           # H0: NAO existe tendência
+  
+  # Extração dos valores-p e conclusões
+  p_value <- c(ADF$p.value, PP$p.value, KPSSL$p.value)
+  p_value1 <- ifelse(p_value[1:2] >= 0.05, "Tendência", "NAO tendência")
+  p_value2 <- ifelse(p_value[3] >= 0.05, "NAO tendência", "Tendência")
+  
+  # Tabela com os resultados dos testes
+  tabela <- data.frame(
+    Testes = c("Augmented Dickey-Fuller", "Phillips-Perron Unit Root", "KPSS Test for Level"),
+    H0 = c("Tendência", "Tendência", "NAO tendência"),
+    p_valor = round(p_value, 4),
+    Conclusao = c(p_value1, p_value2)
+  )
+  
+  # Retornar os resultados em lista
+  list(ADF = ADF, PP = PP, KPSSL = KPSSL, Tabela = tabela)
+}
+
+resultado_raiz_unitaria <- raiz_unit(serie_temporal)
+print(resultado_raiz_unitaria$Tabela)
+```
+
+
+## Sazonalidade
+
+```{r}
+sazonalidade <- function(ts, diff = 0, freq = 12) {
+  # Aplicação dos testes de sazonalidade
+  KrusW <- suppressWarnings(seastests::kw(ts, diff = diff, freq = freq))   # H0: NAO sazonal
+  Fried <- suppressWarnings(seastests::fried(ts, diff = diff, freq = freq)) # H0: NAO sazonal
+  
+  # Extração dos valores-p e conclusões
+  p_value <- c(KrusW$Pval, Fried$Pval)
+  p_value1 <- ifelse(p_value >= 0.05, "NAO sazonal", "Sazonal")
+  
+  # Tabela com os resultados dos testes
+  tabela <- data.frame(
+    Testes = c("Kruskal-Wallis", "Friedman rank"),
+    H0 = rep("NAO sazonal", 2),
+    p_valor = round(p_value, 4),
+    Conclusao = p_value1
+  )
+  
+  # Retornar os resultados em lista
+  list(KrusW = KrusW, Fried = Fried, Tabela = tabela)
+}
+
+resultado_sazonalidade <- sazonalidade(serie_temporal)
+print(resultado_sazonalidade$Tabela)
+```
+
+
+# Séria Temporal Ajustada
+
+```{r}
+n <- length(serie_temporal)
+
+y <- serie_temporal[1:(n-12)]
+y <- ts(y, start = c(year(min(dados_mensais$Month)), month(min(dados_mensais$Month))), frequency = 12)
+
+
+mod1 <- hw(y,seasonal="additive")
+mod2 <- hw(y,seasonal="multiplicative")
+mod3 <- hw(y,seasonal="additive",damped=TRUE)
+mod4 <- hw(y,seasonal="multiplicative",damped=TRUE) 
+# alpha = nivel
+# beta = tendencia
+# gamma = sazonalidade
+```
+
+
+```{r}
+#Critérios de Seleção de Modelos
+
+csm.mod1<-c(mod1$model$aic,mod1$model$bic,mod1$model$aicc)
+csm.mod2<-c(mod2$model$aic,mod2$model$bic,mod2$model$aicc)
+csm.mod3<-c(mod3$model$aic,mod3$model$bic,mod3$model$aicc)
+csm.mod4<-c(mod4$model$aic,mod4$model$bic,mod4$model$aicc)
+scm.mod<-rbind(csm.mod1,csm.mod2,csm.mod3,csm.mod4)
+colnames(scm.mod)<-c("AIC","BIC","AICC")
+rownames(scm.mod)<-c("HW-A","HW-M","HW-AA","HW-MA")
+kable(scm.mod)
+#----------------------------
+#Medidas de Acurácia
+ac.mod1<-accuracy(mod1)
+ac.mod2<-accuracy(mod2)
+ac.mod3<-accuracy(mod3)
+ac.mod4<-accuracy(mod4)
+ac.mod<-rbind(ac.mod1,ac.mod2,ac.mod3,ac.mod4)
+rownames(ac.mod)<-c("HW-A","HW-M","HW-AA","HW-MA")
+kable(ac.mod[,2:6])
+```
+
+Modelo 2, "multiplicativo" é melhor
+
+
+## Previsão
+
+```{r}
+autoplot(mod2) +
+  xlab("tempo") +
+  ylab("Preço Médio do Tomate") +
+  guides(colour=guide_legend(title="Forecast")) +
+  tema_personalizado
+#----------------------------
+```
+
+```{r}
+b <- forecast(mod2, h = 12)
+
+serie <- ts(c(y, b$mean), start = start(y), 
+            frequency = 12)
+```
+
+```{r}
+data <- data.frame(
+   Tempo = as.Date(as.yearmon(time(serie))),
+  Serie = as.numeric(serie),
+  Real = as.numeric(serie_temporal)
+)
+
+ggplot(data) +
+    geom_line(aes(x = Tempo, y = Serie, color = "Previsão"), size = 1) +
+  geom_line(aes(x = Tempo, y = Real, color = "Série Observada"), size = 1) +
+  labs(
+    x = "Tempo",
+    y = "Preço Médio do Tomate",
+    color = "Legenda"
+  ) +
+  scale_color_manual(
+    values = c("Série Observada" = "black", 
+               "Previsão" = "red")
+  ) +
+  scale_x_date(
+    date_breaks = "1 year",
+    date_labels = "%Y"           
+  ) +
+  tema_personalizado +
+  theme(
+    legend.position = "top",
+    legend.background = element_rect(fill = "white", color = NA),
+    legend.title = element_blank()
+  )
+
+```
+
+
+## Análise dos Resíduos
+
+```{r}
+#----------------------------
+#ResC-duo
+res<-mod2$residuals
+#----------------------------
+#AnC!lise dos Res?duos
+ggtsdisplay(res,plot.type="histogram", theme=theme_bw())
+```
+
+### Teste de Normalidade
+
+```{r}
+#Teste de Normalidade dos Resíduos
+shapiro.test(res)
+```
+Os resíduos são normais
+
+
+
+# Conclusão
+
+# Referências
